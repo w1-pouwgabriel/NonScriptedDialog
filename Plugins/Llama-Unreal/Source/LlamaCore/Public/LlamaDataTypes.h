@@ -1,0 +1,521 @@
+// Copyright 2025-current Getnamo.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "LlamaDataTypes.generated.h"
+
+UENUM(BlueprintType)
+enum class EChatTemplateRole : uint8
+{
+    User,
+    Assistant,
+    System,
+    Unknown = 255
+};
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnErrorSignature, const FString&, ErrorMessage, int32, ErrorCode);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTokenGeneratedSignature, const FString&, Token);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnResponseGeneratedSignature, const FString&, Response);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FModelNameSignature, const FString&, ModelName);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPartialSignature, const FString&, Partial);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPromptHistorySignature, FString, History);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnEndOfStreamSignature, bool, bStopSequenceTriggered, float, TokensPerSecond);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnPromptProcessedSignature, int32, TokensProcessed, EChatTemplateRole, Role, float, TokensPerSecond);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FVoidEventSignature);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnEmbeddingsSignature, const TArray<float>&, Embeddings, const FString&, SourceText);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEmbeddingsBatchSignature, const TArray<FString>&, SourceTexts);
+
+UENUM(BlueprintType)
+enum class EMarkdownStreamState : uint8
+{
+    Text,
+    Italic,
+    Bold,
+    Heading,
+    Quote,
+    Emphasis,  //Single-word italic reclassified (e.g. *really* mid-sentence). Distinct from multi-word Italic actions.
+    Thinking   //Content inside <think>...</think> blocks (Qwen3, DeepSeek-R1, etc). Tags themselves are stripped.
+};
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnMarkdownPartialSignature, const FString&, Partial, EMarkdownStreamState, State);
+
+UENUM(BlueprintType)
+enum class ELlamaMediaType : uint8
+{
+    Image,
+    Audio
+};
+
+USTRUCT(BlueprintType)
+struct FLlamaMediaEntry
+{
+    GENERATED_USTRUCT_BODY();
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Llama Media")
+    ELlamaMediaType MediaType = ELlamaMediaType::Image;
+
+    // Image: raw RGB bytes (Width * Height * 3). Populated by UTexture2D readback or manually.
+    TArray<uint8> ImageRGBData;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Llama Media")
+    int32 ImageWidth = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Llama Media")
+    int32 ImageHeight = 0;
+
+    // Audio: PCM float samples at model's expected sample rate (typically 16 kHz).
+    TArray<float> AudioPCMData;
+
+    // Optional file path (image or audio). If set, raw data arrays are ignored.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Llama Media")
+    FString FilePath;
+};
+
+USTRUCT(BlueprintType)
+struct FLlamaMultimodalPrompt
+{
+    GENERATED_USTRUCT_BODY();
+
+    // Text with <__media__> markers indicating where each media entry is placed (in order).
+    // If no markers are present and there is exactly one media entry, a marker is auto-prepended.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Multimodal Chat", meta = (MultiLine = true))
+    FString Prompt;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Multimodal Chat")
+    EChatTemplateRole Role = EChatTemplateRole::User;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Multimodal Chat")
+    bool bAddAssistantBOS = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Multimodal Chat")
+    bool bGenerateReply = true;
+
+    // Media entries: one per <__media__> marker in the prompt text, in order.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Multimodal Chat")
+    TArray<FLlamaMediaEntry> MediaEntries;
+};
+
+USTRUCT(BlueprintType)
+struct FLlamaRunTimings
+{
+    GENERATED_USTRUCT_BODY();
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model Advanced Params")
+    float SampleTime = 0.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model Advanced Params")
+    float PromptEvalTime = 0.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model Advanced Params")
+    float EvalTime = 0.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model Advanced Params")
+    float TotalTime = 0.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model Advanced Params")
+    float TokensPerSecond = 0.f;
+};
+
+
+USTRUCT(BlueprintType)
+struct FLLMSamplingParams
+{
+    GENERATED_USTRUCT_BODY();
+
+    //Updates the logits l_i` = l_i/t. When t <= 0.0f, the maximum logit is kept at it's original value, the rest are set to -inf
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sampling")
+    float Temp = 0.80f;
+
+    //Minimum P sampling as described in https://github.com/ggml-org/llama.cpp/pull/3841. if non -1 it will apply, typically good value ~0.05f
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sampling")
+    float MinP = 0.05f;
+
+    //Top-K sampling described in academic paper "The Curious Case of Neural Text Degeneration" https://arxiv.org/abs/1904.09751. if non -1 it will apply, typically good value ~40
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sampling")
+    int32 TopK = -1;
+
+    //Nucleus sampling described in academic paper "The Curious Case of Neural Text Degeneration" https://arxiv.org/abs/1904.09751. if non -1 it will apply, typically good value ~0.95f
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sampling")
+    float TopP = -1.f;
+
+    //Locally Typical Sampling implementation described in the paper https://arxiv.org/abs/2202.00666. If non -1 it will apply, typically good value 1.f
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sampling")
+    float TypicalP = -1.f;
+
+    //Repetition Penalty; avoid using on the full vocabulary as searching for repeated tokens can become slow, consider using Top-k and top-p smapling first. 0 is off, -1 is context
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Penalties")
+    int32 PenaltyLastN = 0;
+
+    //Repetition Penalty. 1 is disabled
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Penalties")
+    float PenaltyRepeat = 1.f;
+
+    //Repetition Penalty - frequency based. 0 is disabled
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Penalties")
+    float PenaltyFrequency = 0.f;
+
+    //Repetition Penalty - presence based. 0 is disabled
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Penalties")
+    float PenaltyPresence = 0.f;
+
+    //Mirostat 2.0 algorithm described in the paper https://arxiv.org/abs/2007.14966.
+    //If Mirostat != -1 then it will apply this seed value using mirostat v2 algorithm
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mirostat")
+    int32 Mirostat = -1;
+
+    //Mirostat target entropy
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mirostat")
+    float MirostatTau = 5.f;
+
+    //Mirostat learning rate
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Mirostat")
+    float MirostatEta = 0.1f;
+
+    //if true sampling params won't be passed (v0.8)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sampling")
+    bool bUseCommonSampler = true;
+};
+
+USTRUCT(BlueprintType)
+struct FLLMMarkdownStreamParams
+{
+    GENERATED_USTRUCT_BODY();
+
+    //When enabled, markdown formatting is parsed from the token stream and OnMarkdownPartialGenerated emits partials tagged with state (Text, Italic, Bold, Heading, Quote). Formatting chars are stripped.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Markdown")
+    bool bSplitMarkdown = false;
+
+    //When enabled, leading and trailing whitespace/newlines are trimmed from each emitted markdown partial.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Markdown")
+    bool bTrimMarkdownPartialWhitespace = true;
+
+    //When enabled, single-word italic blocks (e.g. *really*) are reclassified as Emphasis instead of Italic. Useful to distinguish mid-sentence emphasis from multi-word action descriptions like *He walks away.*
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Markdown")
+    bool bSingleWordItalicAsEmphasis = true;
+
+    //When enabled, emphasis words are folded into the surrounding Text segment instead of breaking it. e.g. "He looked *really* surprised." emits one Text partial "He looked really surprised." instead of three.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Markdown")
+    bool bCollectEmphasisInText = true;
+};
+
+USTRUCT(BlueprintType)
+struct FLLMThinkingParams
+{
+    GENERATED_USTRUCT_BODY();
+
+    //When enabled (default), thinking models (e.g. Qwen3) use chain-of-thought reasoning in <think> blocks.
+    //When disabled, injects an empty think block to suppress reasoning entirely (faster, no thinking tokens).
+    //Auto-detected from model template; has no effect on non-thinking models.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Thinking")
+    bool bEnableThinking = true;
+
+    //If true, <think>...</think> blocks are stripped from the emitted response.
+    //The raw response (with thinking) is still preserved in message history for context.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Thinking")
+    bool bStripThinkingFromResponse = false;
+};
+
+USTRUCT(BlueprintType)
+struct FLLMOutputParams
+{
+    GENERATED_USTRUCT_BODY();
+
+    //synced per eos
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Output")
+    bool bSyncStructuredChatHistory = true;
+
+    //run processing to emit e.g. sentence level breakups
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Output")
+    bool bEmitPartials = true;
+
+    //Process callbacks on gamethread - NB: always emits on game thread for now, option doesn't do anything.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Output")
+    bool bEmitOnGameThread = true;
+
+    //temporarily defaulted on during dev
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Output")
+    bool bLogGenerationStats = true;
+
+    //usually . ? !
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Output")
+    TArray<FString> PartialsSeparators;
+
+    //if set above 0.f it will sleep between generation passes to ease gpu pressure
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pacing")
+    float TokenGenerationPacingSleep = 0.f;
+
+    //if set above 0.f it will sleep between prompt passes (chunking) to ease gpu pressure
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pacing")
+    float PromptProcessingPacingSleep = 0.f;
+
+    //this part is only active if PromptProcessingPacingSleep > 0.f. Splits prompts into n chunks with sleep
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pacing")
+    int32 PromptProcessingPacingSplitN = 4;
+};
+
+USTRUCT(BlueprintType)
+struct FLLMModelAdvancedParams
+{
+    GENERATED_USTRUCT_BODY();
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model Advanced Params")
+    FLLMSamplingParams Sampling;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model Advanced Params")
+    FLLMOutputParams Output;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model Advanced Params")
+    FLLMMarkdownStreamParams Markdown;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model Advanced Params")
+    FLLMThinkingParams Thinking;
+
+    //use common_init instead of normal - may break functionality, use with care
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model Advanced Params")
+    bool bUseCommonParams = false;
+
+    //set to true if you want to use GeneratePromptEmbeddingsForText
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model Advanced Params")
+    bool bEmbeddingMode = false;
+};
+
+USTRUCT(BlueprintType)
+struct FStructuredChatMessage
+{
+    GENERATED_USTRUCT_BODY();
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structured Chat Message")
+    EChatTemplateRole Role = EChatTemplateRole::Assistant;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structured Chat Message")
+    FString Content;
+};
+
+USTRUCT(BlueprintType)
+struct FStructuredChatHistory
+{
+    GENERATED_USTRUCT_BODY();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structured Chat History")
+    TArray<FStructuredChatMessage> History;
+};
+
+
+//Todo: refactor to jinja style string
+// 
+//Easy user-specified chat template, or use common templates. Don't specify if you wish to load GGUF template.
+USTRUCT(BlueprintType)
+struct FChatTemplate
+{
+    GENERATED_USTRUCT_BODY();
+
+    //Role: System
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Chat Template")
+    FString System;
+
+    //Role: User
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Chat Template")
+    FString User;
+
+    //Role: Assistant
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Chat Template")
+    FString Assistant;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Chat Template")
+    FString CommonSuffix;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Chat Template")
+    FString Delimiter;
+
+    FChatTemplate()
+    {
+        System = TEXT("");
+        User = TEXT("");
+        Assistant = TEXT("");
+        CommonSuffix = TEXT("");
+        Delimiter = TEXT("");
+    }
+    bool IsEmptyTemplate()
+    {
+        return (
+            System == TEXT("") &&
+            User == TEXT("") &&
+            Assistant == TEXT("") &&
+            CommonSuffix == TEXT("") && 
+            Delimiter == TEXT(""));
+    }
+};
+
+
+USTRUCT(BlueprintType)
+struct FJinjaChatTemplate
+{
+    GENERATED_USTRUCT_BODY();
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jinja Chat Template")
+    FString TemplateSource = TEXT("");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (MultiLine = true), Category = "Jinja Chat Template")
+    FString Jinja = TEXT("");
+};
+
+//Initial state fed into the model
+USTRUCT(BlueprintType)
+struct FLLMModelParams
+{
+    GENERATED_USTRUCT_BODY();
+
+    //If path begins with a . it's considered relative to Saved/Models path, otherwise it's an absolute path.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model Params")
+    FString PathToModel = "./model.gguf";
+
+    // Path to multimodal projector GGUF (mmproj). If empty, multimodal is disabled.
+    // Paths beginning with '.' are relative to Saved/Models path.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model Params")
+    FString MmprojPath;
+
+    //Gets embedded on first input after a model load
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model Params", meta=(MultiLine=true))
+    FString SystemPrompt = "You are a helpful assistant.";
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model Params")
+    bool bAutoInsertSystemPromptOnLoad = true;
+
+    //applies to component API
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model Params")
+    bool bAutoLoadModelOnStartup = true;
+
+    //When true, this component's local model KV cache is being driven externally (e.g. via
+    //ImpersonateTemplatedPrompt / ImpersonateTemplatedToken). Rollback helpers (RemoveLastAssistantReply,
+    //RemoveLastUserInput) and RebuildContextFromHistory mutate ModelState only — they will NOT call
+    //into FLlamaNative. Note: this flag has no effect on FLlamaDualBackend's local/remote routing,
+    //which is controlled separately via SetUseRemote().
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model Params")
+    bool bImpersonationMode = false;
+
+    //If not different than default empty, no template will be applied
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model Params")
+    FJinjaChatTemplate CustomChatTemplate;
+
+    //If set anything other than unknown, AI chat role will be enforced. Assistant is default
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model Params")
+    EChatTemplateRole ModelRole = EChatTemplateRole::Assistant;
+
+    //Additional stop sequences - not currently active
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model Params")
+    TArray<FString> StopSequences;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model Params")
+    int32 MaxContextLength = 4096;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model Params")
+    int32 GPULayers = 50;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model Params")
+    int32 Threads = 8;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model Params")
+    int32 MaxBatchLength = 1024;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model Params")
+    int32 Seed = -1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model Params")
+    FLLMModelAdvancedParams Advanced;
+};
+
+//Current State
+USTRUCT(BlueprintType)
+struct FLLMModelState
+{
+    GENERATED_USTRUCT_BODY();
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model State")
+    bool bModelIsLoaded = false;
+
+    //The raw context history with formatting applied
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model State")
+    FString ContextHistory;
+
+    //Where prompt history is raw, chat is an ordered structure. May not be relevant for non-chat type llm data
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model State")
+    FStructuredChatHistory ChatHistory;
+
+    //Optional split according to partials
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model State")
+    TArray<FString> Partials;
+
+    //Synced with current context length
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model State")
+    int32 ContextUsed = 0;
+
+    //Updates after each eos1
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model State")
+    float LastTokenGenerationSpeed = 0.f;
+
+    //Updates after each prompt processing
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model State")
+    float LastPromptProcessingSpeed = 0.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model State")
+    EChatTemplateRole LastRole = EChatTemplateRole::Unknown;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model State")
+    FJinjaChatTemplate ChatTemplateInUse;
+};
+
+USTRUCT()
+struct FLLMThreadTask
+{
+    GENERATED_USTRUCT_BODY();
+
+    TFunction<void(int64)> TaskFunction;
+
+    UPROPERTY()
+    int64 TaskId = 0;
+};
+
+
+USTRUCT(BlueprintType)
+struct FLlamaChatPrompt
+{
+    GENERATED_BODY()
+
+public:
+    /** The prompt string */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Chat")
+    FString Prompt;
+
+    /** The role of the chat message */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Chat")
+    EChatTemplateRole Role = EChatTemplateRole::User;
+
+    /** Whether to add Assistant Beginning-of-Stream token */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Chat")
+    bool bAddAssistantBOS = false;
+
+    /** Whether to generate a reply */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Chat")
+    bool bGenerateReply = true;
+
+    /** Optional assistant-turn prefill (a.k.a. prepend). When non-empty AND bAddAssistantBOS=true,
+     *  this text is inserted into the assistant turn after the BOS header but before sampling
+     *  begins. The model continues from this text without an intervening end-of-turn token, and
+     *  the prefill is treated as if the model produced it: streamed through token/partial
+     *  delegates, included in the final response, and stored as part of the assistant message
+     *  history. Useful for steering first-token behavior (e.g. "Answer: ") or for hard-suppressing
+     *  a thinking block (e.g. prefill = "<think></think>\n"). */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Chat", meta=(MultiLine=true))
+    FString AssistantPrefill;
+
+    FLlamaChatPrompt() {}
+
+    FLlamaChatPrompt(const FString& InPrompt, EChatTemplateRole InRole = EChatTemplateRole::User, bool bInAddAssistantBOS = false, bool bInGenerateReply = true, const FString& InAssistantPrefill = TEXT(""))
+        : Prompt(InPrompt)
+        , Role(InRole)
+        , bAddAssistantBOS(bInAddAssistantBOS)
+        , bGenerateReply(bInGenerateReply)
+        , AssistantPrefill(InAssistantPrefill)
+    {
+    }
+};

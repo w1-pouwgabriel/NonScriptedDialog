@@ -1,0 +1,141 @@
+// Copyright 2025-current Getnamo.
+
+#include "Misc/AutomationTest.h"
+
+#if WITH_DEV_AUTOMATION_TESTS
+
+#include "Embedding/RagStore.h"
+#include "RagAskTestSink.h"
+#include "RagTestHelpers.h"
+#include "Misc/Paths.h"
+
+// Shared model/corpus discovery + ticker-pump helpers (unity-safe; see RagTestHelpers.h).
+using namespace LlamaRagTestHelpers;
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRagAskPipelineTest,
+    "LlamaTools.RAG.AskPipeline",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FRagAskPipelineTest::RunTest(const FString& /*Parameters*/)
+{
+    const FString EmbedPath = FindEmbeddingModel();
+    const FString ChatPath  = FindChatModel();
+    const FString Corpus    = FindCorpusDir();
+
+    if (EmbedPath.IsEmpty() || ChatPath.IsEmpty() || Corpus.IsEmpty())
+    {
+        AddInfo(FString::Printf(TEXT(
+            "Skipping integration test — required artifacts missing.\n"
+            "  EmbeddingModel: %s\n"
+            "  ChatModel:      %s\n"
+            "  Corpus:         %s"),
+            EmbedPath.IsEmpty() ? TEXT("NOT FOUND") : *EmbedPath,
+            ChatPath.IsEmpty()  ? TEXT("NOT FOUND") : *ChatPath,
+            Corpus.IsEmpty()    ? TEXT("NOT FOUND") : *Corpus));
+        return true;
+    }
+    AddInfo(FString::Printf(TEXT("Embedder: %s"), *EmbedPath));
+    AddInfo(FString::Printf(TEXT("Chat:     %s"), *ChatPath));
+    AddInfo(FString::Printf(TEXT("Corpus:   %s"), *Corpus));
+
+    URagStore* Store = NewObject<URagStore>();
+    URagAskTestSink* Sink = NewObject<URagAskTestSink>();
+
+    Store->EmbeddingModelParams.PathToModel       = EmbedPath;
+    Store->EmbeddingModelParams.MaxContextLength  = 2048;
+    Store->EmbeddingModelParams.GPULayers         = 99;
+    Store->EmbeddingModelParams.bAutoInsertSystemPromptOnLoad = false;
+
+    // Inherit URagStore's default AnswerModelParams (system prompt + Temp=0.2 + auto-insert on)
+    // and only override the model path + a couple of perf knobs. The defaults are tuned for
+    // RAG answer generation and the test should validate them.
+    Store->AnswerModelParams.PathToModel       = ChatPath;
+    Store->AnswerModelParams.MaxContextLength  = 4096;
+    Store->AnswerModelParams.GPULayers         = 99;
+    // Random seed (-1) — at the FLLMSamplingParams default Temp of 0.8 some seeds
+    // deterministically hit the Gemma3 first-token-EOT failure mode. Random seed +
+    // soft assertion on empty answer (below) keeps the test useful as a smoke check
+    // without turning a known model quirk into a CI false-positive.
+    Store->AnswerModelParams.Seed              = -1;
+
+    // Test assertions inspect the retrieved chunks — opt in to the broadcast.
+    Store->bBroadcastChunksOnAsk = true;
+
+    Store->OnAskRetrievedChunks.AddDynamic(Sink, &URagAskTestSink::HandleRetrieved);
+    Store->OnAskResponseGenerated.AddDynamic(Sink, &URagAskTestSink::HandleResponse);
+    Store->OnAskEndOfStream.AddDynamic(Sink, &URagAskTestSink::HandleEnd);
+    Store->OnAskError.AddDynamic(Sink, &URagAskTestSink::HandleError);
+    Store->OnIngestComplete.AddDynamic(Sink, &URagAskTestSink::HandleIngest);
+
+    Store->LoadModels();
+    if (!WaitFor(180.0, [&]() { return Store->IsEmbedderReady() && Store->IsAnswerEngineReady(); }))
+    {
+        AddError(TEXT("Model load timed out (180s)"));
+        return false;
+    }
+    AddInfo(FString::Printf(TEXT("Models loaded. VectorParams.Dimensions = %d"),
+        Store->VectorParams.Dimensions));
+
+    Store->Initialize();
+    TestTrue(TEXT("Store initialized"), Store->IsInitialized());
+    TestTrue(TEXT("VectorParams.Dimensions auto-pulled from embedder"), Store->VectorParams.Dimensions > 0);
+
+    const int32 FilesQueued = Store->IngestDirectory(Corpus, TEXT("md"), /*recursive*/ true);
+    TestTrue(FString::Printf(TEXT("Files queued (%d)"), FilesQueued), FilesQueued >= 5);
+
+    if (!WaitFor(180.0, [&]() { return Sink->IngestAdded >= 0; }))
+    {
+        AddError(TEXT("Ingest timed out (180s)"));
+        return false;
+    }
+    AddInfo(FString::Printf(TEXT("Ingested %d chunks across %d files"), Sink->IngestAdded, FilesQueued));
+    TestTrue(TEXT("At least one chunk indexed"), Sink->IngestAdded > 0);
+
+    const FString Question = TEXT("How can I tell my dough has finished bulk fermentation?");
+    Store->AskDefault(Question);
+
+    if (!WaitFor(180.0, [&]() { return Sink->bAskEnd || Sink->bAskError; }))
+    {
+        AddError(TEXT("Ask timed out (180s)"));
+        return false;
+    }
+    if (Sink->bAskError)
+    {
+        AddError(FString::Printf(TEXT("Ask reported an error: %s"), *Sink->LastError));
+        return false;
+    }
+
+    TestTrue(TEXT("OnAskRetrievedChunks fired"), Sink->bAskRetrieved);
+    TestTrue(TEXT("OnAskResponseGenerated fired"), Sink->bAskResponse);
+    TestTrue(TEXT("OnAskEndOfStream fired"), Sink->bAskEnd);
+    TestTrue(TEXT("Retrieved at least one chunk"), Sink->RetrievedChunks.Num() > 0);
+
+    if (Sink->RetrievedChunks.Num() > 0)
+    {
+        const FLlamaChunk& Top = Sink->RetrievedChunks[0];
+        AddInfo(FString::Printf(
+            TEXT("Top-1: source=%s | confidence=%.3f | retriever=%d | text starts: %s"),
+            *Top.Source, Top.Confidence, (int32)Top.SourceRetriever,
+            *Top.Text.Left(80)));
+        TestTrue(TEXT("Top-1 source contains 'sourdough' (expected for this question)"),
+            Top.Source.Contains(TEXT("sourdough"), ESearchCase::IgnoreCase));
+        TestTrue(TEXT("Top-1 Confidence == 1.0"),
+            FMath::IsNearlyEqual(Top.Confidence, 1.f, 1e-4f));
+    }
+
+    AddInfo(FString::Printf(TEXT("Answer (truncated): %s"), *Sink->FinalAnswer.Left(400)));
+    if (Sink->FinalAnswer.IsEmpty())
+    {
+        // Known Gemma3 quirk: occasionally emits end_of_turn as the first token,
+        // producing an empty completion. Mitigated (not eliminated) by the prompt-
+        // template Answer: suffix and a non-empty system prompt. Surface as a warning
+        // so flakiness is visible in CI but doesn't fail the test outright.
+        AddWarning(TEXT("Answer was empty — likely first-token-EOT on the answer model. ")
+                   TEXT("Retrieval pipeline still validated above."));
+    }
+
+    Store->Reset();
+    return true;
+}
+
+#endif // WITH_DEV_AUTOMATION_TESTS

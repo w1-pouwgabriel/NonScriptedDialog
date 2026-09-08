@@ -1,0 +1,60 @@
+# ============================
+# Unreal Engine 5 - Generated/Cache folders
+# ============================
+Binaries/
+Build/
+DerivedDataCache/
+Intermediate/
+Saved/
+.vs/
+.vscode/
+.idea/
+
+# Compiled plugin binaries (recompiled from source on each machine)
+Plugins/*/Binaries/
+Plugins/*/Intermediate/
+
+# ============================
+# Unreal Engine 5 - Generated project files
+# ============================
+*.VC.db
+*.opensdf
+*.opendb
+*.sdf
+*.sln
+*.suo
+*.xcodeproj
+*.xcworkspace
+
+# ============================
+# Local LLM model files (Llama-Unreal / GGUF)
+# ============================
+# GGUF models are large binaries and shouldn't be versioned in git.
+# Document download links/instructions in the README instead.
+*.gguf
+*.bin
+Saved/Models/
+
+# llama.cpp build artifacts (if building from source per the plugin's
+# build instructions, rather than using the precompiled release)
+ThirdParty/LlamaCpp/Lib/
+ThirdParty/LlamaCpp/Binaries/
+
+# ============================
+# OS-specific junk files
+# ============================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ============================
+# Packaging/build output
+# ============================
+Saved/StagedBuilds/
+Saved/Cooked/
+
+# ============================
+# Miscellaneous
+# ============================
+*.log
+*.tmp
