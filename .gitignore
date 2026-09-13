@@ -10,8 +10,12 @@ Saved/
 .vscode/
 .idea/
 
-# Compiled plugin binaries (recompiled from source on each machine)
-Plugins/*/Binaries/
+# ============================
+# Plugin binaries
+# ============================
+# Plugin Binaries/ are tracked on purpose: some binaries in NonScriptedDialog
+# are prebuilt/vendored and are NOT recompiled from source on each machine.
+# Do NOT ignore Plugins/*/Binaries/ - only ignore build intermediates.
 Plugins/*/Intermediate/
 
 # ============================
@@ -32,13 +36,20 @@ Plugins/*/Intermediate/
 # GGUF models are large binaries and shouldn't be versioned in git.
 # Document download links/instructions in the README instead.
 *.gguf
-*.bin
 Saved/Models/
 
-# llama.cpp build artifacts (if building from source per the plugin's
-# build instructions, rather than using the precompiled release)
-ThirdParty/LlamaCpp/Lib/
-ThirdParty/LlamaCpp/Binaries/
+# NOTE: previously "*.bin" was ignored globally, which risked catching
+# required non-model binaries too. Scope it to the models folder instead.
+Saved/Models/*.bin
+
+# ============================
+# ThirdParty binaries (llama.cpp)
+# ============================
+# These ARE required to run the plugin and are not rebuilt from source
+# on every machine, so they must stay tracked in git (ideally via Git LFS -
+# see .gitattributes). Do NOT ignore these folders.
+# ThirdParty/LlamaCpp/Lib/
+# ThirdParty/LlamaCpp/Binaries/
 
 # ============================
 # OS-specific junk files
