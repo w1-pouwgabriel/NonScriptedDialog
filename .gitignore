@@ -1,7 +1,7 @@
 # ============================
 # Unreal Engine 5 - Generated/Cache folders
 # ============================
-Binaries/
+Binaries/*
 Build/
 DerivedDataCache/
 Intermediate/
@@ -16,7 +16,7 @@ Saved/
 # Plugin Binaries/ are tracked on purpose: some binaries in NonScriptedDialog
 # are prebuilt/vendored and are NOT recompiled from source on each machine.
 # Do NOT ignore Plugins/*/Binaries/ - only ignore build intermediates.
-Plugins/*/Intermediate/
+# Plugins/*/Intermediate/
 
 # ============================
 # Unreal Engine 5 - Generated project files
@@ -37,6 +37,8 @@ Plugins/*/Intermediate/
 # Document download links/instructions in the README instead.
 *.gguf
 Saved/Models/
+Plugins/Llama-Unreal/Binaries/Win64/*.pdb
+Plugins/Llama-Unreal/Binaries/Win64/*.modules
 
 # NOTE: previously "*.bin" was ignored globally, which risked catching
 # required non-model binaries too. Scope it to the models folder instead.
@@ -48,8 +50,8 @@ Saved/Models/*.bin
 # These ARE required to run the plugin and are not rebuilt from source
 # on every machine, so they must stay tracked in git (ideally via Git LFS -
 # see .gitattributes). Do NOT ignore these folders.
-# ThirdParty/LlamaCpp/Lib/
-# ThirdParty/LlamaCpp/Binaries/
+Plugins/Llama-Unreal/ThirdParty/LlamaCpp/Lib/
+Plugins/Llama-Unreal/ThirdParty/LlamaCpp/Binaries/
 
 # ============================
 # OS-specific junk files
