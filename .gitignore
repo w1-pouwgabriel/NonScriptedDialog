@@ -39,6 +39,13 @@ Saved/
 Saved/Models/
 Plugins/Llama-Unreal/Binaries/Win64/*.pdb
 Plugins/Llama-Unreal/Binaries/Win64/*.modules
+Plugins/Llama-Unreal/Binaries/Win64/*.lib
+Plugins/Llama-Unreal/Binaries/Win64/*.exp
+
+Plugins/Llama-Unreal/Binaries/Win64/UnrealEditor-LlamaWhisper.dll
+Plugins/Llama-Unreal/Binaries/Win64/UnrealEditor-LlamaTools.dll
+Plugins/Llama-Unreal/Binaries/Win64/UnrealEditor-LlamaCore.dll
+
 
 # NOTE: previously "*.bin" was ignored globally, which risked catching
 # required non-model binaries too. Scope it to the models folder instead.
