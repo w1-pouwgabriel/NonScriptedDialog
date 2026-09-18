@@ -32,12 +32,6 @@ class ANonScriptedDialogCharacter : public ACharacter
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components", meta = (AllowPrivateAccess = "true"))
 	UCameraComponent* FollowCamera;
 
-
-	// Llama data and logic
-
-	UPROPERTY(VisibleAnywhere)
-	ULlamaComponent* LlamaComp;
-
 protected:
 	UFUNCTION()
 	void OnModelReady(const FString& ModelName);

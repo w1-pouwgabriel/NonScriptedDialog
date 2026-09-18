@@ -9,23 +9,23 @@
 /**
  * Raw persona data for a single NPC.
  * Kept as a plain USTRUCT so it can also be used inline (e.g. in a table row)
- * if you later want to bulk-define NPCs via a DataTable instead of individual assets.
+ * if I later want to bulk-define NPCs via a DataTable instead of individual assets.
  */
 USTRUCT(BlueprintType)
 struct NONSCRIPTEDDIALOG_API FNPCCharacterSheet
 {
 	GENERATED_BODY()
 
-	// Display name of the NPC, e.g. "Boran Ironhide"
+	// Display name of the NPC, e.g. "Bjorn Ironhide"
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Identity")
 	FString CharacterName;
 
-	// Their function in the world, e.g. "Village blacksmith"
+	// Their function in the world, e.g. "Blacksmith"
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Identity")
 	FString Role;
 
 	// 3-5 adjectives, kept as separate entries so designers don't need to
-	// worry about comma formatting - we join them when building the prompt.
+	// worry about comma formatting, they get joined when building the promt.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Persona")
 	TArray<FString> PersonalityTraits;
 
@@ -46,7 +46,7 @@ struct NONSCRIPTEDDIALOG_API FNPCCharacterSheet
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Persona", meta = (MultiLine = "true"))
 	FString GoalsAndMotivations;
 
-	// e.g. "Stranger", "Ally", "Rival" - affects tone toward the player.
+	// "Stranger", "Ally", "Rival", affects tone toward the player.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Persona")
 	FString RelationshipToPlayer;
 
@@ -68,12 +68,10 @@ struct NONSCRIPTEDDIALOG_API FNPCCharacterSheet
 
 /**
  * A single, creatable Content Browser asset wrapping one FNPCCharacterSheet.
- * Create one of these per NPC (e.g. DA_NPC_Boran, DA_NPC_Yselle) and assign it
- * to the NPC's dialogue component in the level or Blueprint.
- *
- * Being a UPrimaryDataAsset (rather than plain UDataAsset) means these can also
- * be enumerated in bulk later via the Asset Manager if you want to validate
- * all NPC sheets at once, or async-load them by PrimaryAssetId.
+ * Create one of these for each NPC.
+ * 
+ * Dynamic loading and unloading of DataAssets, this can be used later if we need to save some space
+ * https://dev.epicgames.com/documentation/unreal-engine/asset-management-in-unreal-engine#registering-and-loading-dynamically-created-primary-assets
  */
 UCLASS(BlueprintType)
 class NONSCRIPTEDDIALOG_API UNPCCharacterSheetAsset : public UPrimaryDataAsset
@@ -87,8 +85,7 @@ public:
 	/**
 	 * Builds the static portion of the system prompt for this NPC.
 	 * This does NOT include conversation history or the player's current
-	 * input - those get appended separately (Week 3's next piece) so this
-	 * block can be cached/reused across turns instead of rebuilt every time.
+	 * input.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "NPC")
 	FString BuildBaseSystemPrompt() const;

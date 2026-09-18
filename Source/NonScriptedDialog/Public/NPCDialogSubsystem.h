@@ -1,0 +1,94 @@
+
+// Centralized owner of every NPC's conversation context, and the single
+// queue through which all generation requests pass
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "Containers/Queue.h"
+#include "NPCCharacterSheet.h"
+#include "NPCDialogTypes.h"
+#include "NPCDialogSubsystem.generated.h"
+
+/** Everything the subsystem needs to remember about one NPC. */
+USTRUCT()
+struct FNPCConversationState
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TObjectPtr<UNPCCharacterSheetAsset> CharacterSheetAsset = nullptr;
+
+	// Built once when the NPC registers, since persona data doesn't change
+	// mid-conversation - avoids re-formatting it on every single turn.
+	UPROPERTY()
+	FString CachedBaseSystemPrompt;
+
+	UPROPERTY()
+	TArray<FNPCConversationEntry> ConversationHistory;
+
+	UPROPERTY()
+	int32 MaxHistoryEntries = 12;
+};
+
+/** One queued generation request, waiting its turn against the shared model. */
+struct FPendingDialogueRequest
+{
+	FName NPCId;
+	FString PlayerInput;
+	FOnDialogueResponse Callback;
+};
+
+/**
+ * Game-instance-lifetime subsystem. All NPC context lives here, keyed by
+ * NPCId, instead of scattered across per-actor components. NPC actors only
+ * hold an ID and forward requests here.
+ */
+UCLASS()
+class NONSCRIPTEDDIALOG_API UNPCDialogSubsystem : public UGameInstanceSubsystem
+{
+	GENERATED_BODY()
+
+public:
+	/** Call once per NPC, e.g. from UNPCDialogueComponent::BeginPlay. Safe to call again (no-op if already registered). */
+	UFUNCTION(BlueprintCallable, Category = "NPC|Dialogue")
+	void RegisterNPC(FName NPCId, UNPCCharacterSheetAsset* CharacterSheetAsset, int32 MaxHistoryEntries = 12);
+
+	/**
+	 * Records the player's line for NPCId and enqueues a generation request.
+	 * OnComplete fires with the generated text once this request reaches the
+	 * front of the queue and the model finishes. Requests are processed one
+	 * at a time in submission order, across ALL NPCs, since they share one model.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "NPC|Dialogue")
+	void RequestGeneration(FName NPCId, const FString& PlayerInput, FOnDialogueResponse OnComplete);
+
+	/** Clears one NPC's history, e.g. when a conversation session ends. */
+	UFUNCTION(BlueprintCallable, Category = "NPC|Dialogue")
+	void ResetConversation(FName NPCId);
+
+	UFUNCTION(BlueprintPure, Category = "NPC|Dialogue")
+	bool IsNPCRegistered(FName NPCId) const;
+
+private:
+	// The context registry: single source of truth for every NPC's state.
+	UPROPERTY()
+	TMap<FName, FNPCConversationState> ContextRegistry;
+
+	TQueue<FPendingDialogueRequest> PendingRequests;
+	bool bIsGenerating = false;
+
+	// Pops the next request (if any) and kicks off generation, provided
+	// nothing else is currently running against the shared model.
+	void ProcessNextRequest();
+
+	// Builds persona + rolling history into the final prompt string for one NPC.
+	FString BuildFullPromptForNPC(const FNPCConversationState& State) const;
+
+	void TrimHistoryIfNeeded(FNPCConversationState& State);
+
+	// Called once the model finishes; records the response, fires the
+	// caller's callback, then advances the queue.
+	void HandleGenerationComplete(FName NPCId, FString GeneratedText, FOnDialogueResponse OriginalCallback);
+};
