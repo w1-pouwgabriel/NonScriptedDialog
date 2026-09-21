@@ -9,6 +9,7 @@
 #include "Containers/Queue.h"
 #include "NPCCharacterSheet.h"
 #include "NPCDialogTypes.h"
+#include "LlamaSubsystem.h"
 #include "NPCDialogSubsystem.generated.h"
 
 /** Everything the subsystem needs to remember about one NPC. */
@@ -51,6 +52,12 @@ class NONSCRIPTEDDIALOG_API UNPCDialogSubsystem : public UGameInstanceSubsystem
 	GENERATED_BODY()
 
 public:
+	// Binds to ULlamaSubsystem::OnResponseGenerated. Model loading itself is
+	// triggered here too, since this is the first point anything needs it -
+	// but the load call and the model instance both belong to ULlamaSubsystem.
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+	virtual void Deinitialize() override;
+
 	/** Call once per NPC, e.g. from UNPCDialogueComponent::BeginPlay. Safe to call again (no-op if already registered). */
 	UFUNCTION(BlueprintCallable, Category = "NPC|Dialogue")
 	void RegisterNPC(FName NPCId, UNPCCharacterSheetAsset* CharacterSheetAsset, int32 MaxHistoryEntries = 12);
@@ -79,6 +86,16 @@ private:
 	TQueue<FPendingDialogueRequest> PendingRequests;
 	bool bIsGenerating = false;
 
+	UPROPERTY()
+	TObjectPtr<ULlamaSubsystem> LlamaModelInstance;
+
+	// Which NPC's request is currently in flight against ULlamaSubsystem, and
+	// the callback to fire when it completes. ULlamaSubsystem's own delegate
+	// doesn't carry an NPC id, so we track this ourselves. This is safe because
+	// bIsGenerating guarantees only one request is ever in flight at a time.
+	FName CurrentGeneratingNPCId;
+	FOnDialogueResponse CurrentCallback;
+
 	// Pops the next request (if any) and kicks off generation, provided
 	// nothing else is currently running against the shared model.
 	void ProcessNextRequest();
@@ -91,4 +108,10 @@ private:
 	// Called once the model finishes; records the response, fires the
 	// caller's callback, then advances the queue.
 	void HandleGenerationComplete(FName NPCId, FString GeneratedText, FOnDialogueResponse OriginalCallback);
+	FString SanitizeGeneratedResponse(const FString& RawResponse) const;
+
+	// Bound to ULlamaSubsystem::OnResponseGenerated. Double check this
+	// signature against FOnResponseGeneratedSignature in LlamaDataTypes.h.
+	UFUNCTION()
+	void HandleLlamaResponseGenerated(const FString& Response);
 };

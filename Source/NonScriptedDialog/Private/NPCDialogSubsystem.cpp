@@ -1,8 +1,8 @@
 // NPCDialogSubsystem.cpp
 
 #include "NPCDialogSubsystem.h"
-#include "TimerManager.h"
-#include "Engine/World.h"
+#include "Engine/Engine.h"
+#include "LlamaSubsystem.h"
 
 void UNPCDialogSubsystem::RegisterNPC(FName NPCId, UNPCCharacterSheetAsset* CharacterSheetAsset, int32 MaxHistoryEntries)
 {
@@ -23,6 +23,41 @@ void UNPCDialogSubsystem::RegisterNPC(FName NPCId, UNPCCharacterSheetAsset* Char
 	NewState.MaxHistoryEntries = MaxHistoryEntries;
 
 	ContextRegistry.Add(NPCId, MoveTemp(NewState));
+}
+
+void UNPCDialogSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+{
+	Super::Initialize(Collection);
+
+	if (ULlamaSubsystem* Llama = GEngine->GetEngineSubsystem<ULlamaSubsystem>())
+	{
+		Llama->ModelParams.PathToModel = TEXT("./qwen2.5-1.5b-instruct-q8_0.gguf");
+		Llama->ModelParams.SystemPrompt = TEXT("You are a helpful assistant.");
+		//Llama->OnModelLoaded.AddDynamic(this, &UNPCDialogSubsystem::OnModelLoaded);
+		Llama->ModelParams.StopSequences = { TEXT("\nPlayer:") };
+		Llama->OnResponseGenerated.AddDynamic(this, &UNPCDialogSubsystem::HandleLlamaResponseGenerated);
+		Llama->LoadModel();
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("UNPCDialogSubsystem::Initialize - ULlamaSubsystem not found. Is the LlamaCore plugin enabled?"));
+	}
+}
+
+void UNPCDialogSubsystem::Deinitialize()
+{
+	if (GEngine)
+	{
+		if (ULlamaSubsystem* Llama = GEngine->GetEngineSubsystem<ULlamaSubsystem>())
+		{
+			Llama->OnResponseGenerated.RemoveDynamic(this, &UNPCDialogSubsystem::HandleLlamaResponseGenerated);
+			// Deliberately NOT calling Llama->UnloadModel() here - ULlamaSubsystem
+			// is engine-scoped and may outlive this game instance (e.g. PIE
+			// stop/start), so unloading is its own concern, not ours.
+		}
+	}
+
+	Super::Deinitialize();
 }
 
 bool UNPCDialogSubsystem::IsNPCRegistered(FName NPCId) const
@@ -77,37 +112,45 @@ void UNPCDialogSubsystem::ProcessNextRequest()
 		return;
 	}
 
+	ULlamaSubsystem* Llama = GEngine ? GEngine->GetEngineSubsystem<ULlamaSubsystem>() : nullptr;
+	if (!Llama || !Llama->IsModelLoaded())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("ProcessNextRequest - model not loaded yet, dropping request for '%s'."), *NextRequest.NPCId.ToString());
+		return; // Could re-queue instead of dropping, depending on how you want to handle a cold-start race.
+	}
+
+	// Mark as generating and remember which request is in flight, so
+	// HandleLlamaResponseGenerated (which carries no NPC id of its own)
+	// knows who the response belongs to and which callback to fire.
 	bIsGenerating = true;
-	const FString FullPrompt = BuildFullPromptForNPC(*State);
+	CurrentGeneratingNPCId = NextRequest.NPCId;
+	CurrentCallback = NextRequest.Callback;
 
-	// ---------------------------------------------------------------
-	// TODO: replace this block with the actual Llama Unreal call, e.g.
-	// something like:
-	//
-	//   ULlamaComponent* Llama = GetLlamaComponent();
-	//   Llama->OnResponseGenerated.AddUniqueDynamic(this, &UNPCDialogSubsystem::HandleGenerationComplete);
-	//   Llama->Generate(FullPrompt);
-	//
-	// Since this subsystem only owns ONE shared model, that component
-	// reference should live here (or be fetched from wherever your Llama
-	// Unreal plugin exposes its single instance), not per-NPC.
-	// The stub below fakes an async call with a timer so the queueing
-	// logic is testable before the real model is wired in.
-	FName NPCId = NextRequest.NPCId;
-	FOnDialogueResponse Callback = NextRequest.Callback;
-	FString StubResponse = FString::Printf(TEXT("[stub response to: %s]"), *FullPrompt.Right(60));
+	// Switched away from InsertRawPrompt - StopSequences doesn't appear to be
+	// honored by the local backend, so raw completion had no way to stop
+	// itself. Using InsertTemplatedPrompt instead means each turn is tagged
+	// with a proper chat-template role, and the model's own trained
+	// end-of-turn token (e.g. <|im_end|> for Qwen) stops generation - no
+	// custom stop string required.
+	Llama->ResetContextHistory(false);
+	Llama->InsertTemplatedPrompt(State->CachedBaseSystemPrompt, EChatTemplateRole::System, false, false);
 
-	FTimerHandle StubTimer;
-	GetWorld()->GetTimerManager().SetTimer(
-		StubTimer,
-		[this, NPCId, StubResponse, Callback]()
-		{
-			HandleGenerationComplete(NPCId, StubResponse, Callback);
-		},
-		0.25f,
-		false
-	);
-	// ---------------------------------------------------------------
+	const int32 LastIndex = State->ConversationHistory.Num() - 1;
+	for (int32 i = 0; i < State->ConversationHistory.Num(); ++i)
+	{
+		const FNPCConversationEntry& Entry = State->ConversationHistory[i];
+		const EChatTemplateRole Role = (Entry.Speaker == ENPCDialogSpeaker::Player)
+			? EChatTemplateRole::User
+			: EChatTemplateRole::Assistant;
+
+		// Only the LAST message (the newest player line) should trigger generation -
+		// everything before it is just replaying history into context.
+		const bool bIsLastMessage = (i == LastIndex);
+		Llama->InsertTemplatedPrompt(Entry.Text, Role, bIsLastMessage, /*bGenerateReply=*/bIsLastMessage);
+
+		//UE_LOG(LogTemp, Log, TEXT("%hs: %s"), ToString(Entry.Speaker), *Entry.Text);
+	}
+
 }
 
 void UNPCDialogSubsystem::HandleGenerationComplete(FName NPCId, FString GeneratedText, FOnDialogueResponse OriginalCallback)
@@ -122,6 +165,8 @@ void UNPCDialogSubsystem::HandleGenerationComplete(FName NPCId, FString Generate
 	}
 
 	bIsGenerating = false;
+	CurrentGeneratingNPCId = NAME_None;
+	CurrentCallback = FOnDialogueResponse();
 
 	if (OriginalCallback.IsBound())
 	{
@@ -130,6 +175,26 @@ void UNPCDialogSubsystem::HandleGenerationComplete(FName NPCId, FString Generate
 
 	// More may have queued up while this one was running - advance immediately.
 	ProcessNextRequest();
+}
+
+FString UNPCDialogSubsystem::SanitizeGeneratedResponse(const FString& RawResponse) const
+{
+	// Defensive backstop: even with a stop sequence configured on the model,
+	// truncate anything past the point where the model starts hallucinating
+	// the PLAYER'S side of the conversation - never store or forward that.
+	int32 CutIndex = RawResponse.Find(TEXT("\nPlayer:"), ESearchCase::IgnoreCase);
+	FString Result = (CutIndex != INDEX_NONE) ? RawResponse.Left(CutIndex) : RawResponse;
+
+	Result = Result.TrimEnd();
+
+	return Result;
+}
+
+void UNPCDialogSubsystem::HandleLlamaResponseGenerated(const FString& Response)
+{
+	const FString CleanedResponse = SanitizeGeneratedResponse(Response);
+
+	HandleGenerationComplete(CurrentGeneratingNPCId, CleanedResponse, CurrentCallback);
 }
 
 FString UNPCDialogSubsystem::BuildFullPromptForNPC(const FNPCConversationState& State) const

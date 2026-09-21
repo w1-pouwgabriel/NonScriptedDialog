@@ -13,6 +13,16 @@ enum class ENPCDialogSpeaker : uint8
 	NPC
 };
 
+inline const char* ToString(ENPCDialogSpeaker v)
+{
+	switch (v)
+	{
+	case ENPCDialogSpeaker::Player:   return "Player";
+	case ENPCDialogSpeaker::NPC:   return "NPC";
+	default:      return "[Unknown Speaker type]";
+	}
+}
+
 /** A single turn in a conversation. */
 USTRUCT(BlueprintType)
 struct NONSCRIPTEDDIALOG_API FNPCConversationEntry

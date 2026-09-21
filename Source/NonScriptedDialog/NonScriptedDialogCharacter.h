@@ -5,7 +5,6 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 #include "Logging/LogMacros.h"
-#include "LlamaComponent.h"
 #include "NonScriptedDialogCharacter.generated.h"
 
 class USpringArmComponent;
@@ -31,13 +30,6 @@ class ANonScriptedDialogCharacter : public ACharacter
 	/** Follow camera */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components", meta = (AllowPrivateAccess = "true"))
 	UCameraComponent* FollowCamera;
-
-protected:
-	UFUNCTION()
-	void OnModelReady(const FString& ModelName);
-
-	UFUNCTION()
-	void OnResponseRecieved(const FString& Response);
 	
 protected:
 

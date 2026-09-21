@@ -47,9 +47,6 @@ ANonScriptedDialogCharacter::ANonScriptedDialogCharacter()
 	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
 	FollowCamera->bUsePawnControlRotation = false;
 
-
-	LlamaComp = CreateDefaultSubobject<ULlamaComponent>(TEXT("LlamaComponent"));
-
 	// Note: The skeletal mesh and anim blueprint references on the Mesh component (inherited from Character) 
 	// are set in the derived blueprint asset named ThirdPersonCharacter (to avoid direct content references in C++)
 }
@@ -57,23 +54,6 @@ ANonScriptedDialogCharacter::ANonScriptedDialogCharacter()
 void ANonScriptedDialogCharacter::BeginPlay()
 {
 	Super::BeginPlay();
-
-	LlamaComp->ModelParams.PathToModel = TEXT("./qwen2.5-1.5b-instruct-q8_0.gguf");
-	LlamaComp->ModelParams.SystemPrompt = TEXT("You are a helpful assistant.");
-	LlamaComp->OnModelLoaded.AddDynamic(this, &ANonScriptedDialogCharacter::OnModelReady);
-	LlamaComp->OnResponseGenerated.AddDynamic(this, &ANonScriptedDialogCharacter::OnResponseRecieved);
-	LlamaComp->LoadModel();
-}
-
-void ANonScriptedDialogCharacter::OnModelReady(const FString& ModelName)
-{
-	UE_LOG(LogTemp, Log, TEXT("User said: Hello, who are you?"));
-	LlamaComp->InsertTemplatedPrompt(TEXT("Hello, who are you?"), EChatTemplateRole::User);
-}
-
-void ANonScriptedDialogCharacter::OnResponseRecieved(const FString& Response)
-{
-	UE_LOG(LogTemp, Log, TEXT("NPC said: %s"), *Response);
 }
 
 void ANonScriptedDialogCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
