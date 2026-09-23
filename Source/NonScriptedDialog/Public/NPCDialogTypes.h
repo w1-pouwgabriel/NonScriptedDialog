@@ -37,4 +37,4 @@ struct NONSCRIPTEDDIALOG_API FNPCConversationEntry
 };
 
 /** Delegate fired once the shared model finishes generating a response. */
-DECLARE_DYNAMIC_DELEGATE_OneParam(FOnDialogueResponse, const FString&, Response);
+DECLARE_DYNAMIC_DELEGATE_OneParam(FOnDialogResponse, const FString&, Response);

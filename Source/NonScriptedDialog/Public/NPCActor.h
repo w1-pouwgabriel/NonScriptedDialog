@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "NPCDialogComponent.h"
+#include "NPCChatWidget.h"
 #include "NPCActor.generated.h"
 
 UCLASS()
@@ -23,6 +24,18 @@ public:
 	/** Call this from wherever the player interacts with the NPC (e.g. an interact input or overlap event). */
 	UFUNCTION(BlueprintCallable, Category = "NPC")
 	void TalkTo(const FString& PlayerLine);
+
+	// Assign your WBP_ChatWindow Blueprint (child of UNPCChatWidget) here in the editor.
+	UPROPERTY(EditDefaultsOnly, Category = "NPC|Chat")
+	TSubclassOf<UNPCChatWidget> ChatWidgetClass;
+
+	/**
+	 * Opens the chat window UI for this NPC - this is what your overlap event
+	 * should call now, instead of firing a hardcoded TalkTo line. Switches
+	 * input to UI-only so the player can type, and shows the cursor.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "NPC")
+	void OpenDialogueUI();
 
 private:
 	// Must be a UFUNCTION with this exact signature to bind to the dynamic

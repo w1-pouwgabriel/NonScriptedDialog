@@ -1,4 +1,7 @@
 #include "NPCActor.h"
+#include "Kismet/GameplayStatics.h"
+#include "GameFramework/PlayerController.h"
+#include "Blueprint/WidgetBlueprintLibrary.h"
 
 ANPCActor::ANPCActor()
 {
@@ -14,12 +17,42 @@ void ANPCActor::TalkTo(const FString& PlayerLine)
 		return;
 	}
 
-	// FOnDialogueResponse is a dynamic delegate, so it must bind to a
+	// FOnDialogResponse is a dynamic delegate, so it must bind to a
 	// UFUNCTION() on a UObject, a raw lambda or std::function won't work here.
-	FOnDialogueResponse Callback;
+	FOnDialogResponse Callback;
 	Callback.BindDynamic(this, &ANPCActor::OnDialogueResponseReceived);
 
 	DialogComponent->SendPlayerInput(PlayerLine, Callback);
+}
+
+void ANPCActor::OpenDialogueUI()
+{
+	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+	if (!PC || !ChatWidgetClass || !DialogComponent)
+	{
+		return;
+	}
+
+	UNPCChatWidget* ChatWidget = CreateWidget<UNPCChatWidget>(PC, ChatWidgetClass);
+	if (!ChatWidget)
+	{
+		return;
+	}
+
+	FText DisplayName = FText::FromString(GetName());
+	if (DialogComponent->CharacterSheetAsset)
+	{
+		DisplayName = FText::FromString(DialogComponent->CharacterSheetAsset->CharacterSheet.CharacterName);
+	}
+
+	ChatWidget->SetTargetNPC(DialogComponent, DisplayName);
+	ChatWidget->AddToViewport();
+
+	FInputModeUIOnly InputMode;
+	InputMode.SetWidgetToFocus(ChatWidget->TakeWidget());
+	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+	PC->SetInputMode(InputMode);
+	PC->bShowMouseCursor = true;
 }
 
 void ANPCActor::OnDialogueResponseReceived(const FString& Response)

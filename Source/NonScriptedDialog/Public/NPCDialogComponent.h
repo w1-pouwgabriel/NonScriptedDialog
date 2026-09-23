@@ -35,7 +35,7 @@ public:
 	 * requests, so this may not be immediate if others are ahead in queue).
 	 */
 	UFUNCTION(BlueprintCallable, Category = "NPC")
-	void SendPlayerInput(const FString& PlayerInput, FOnDialogueResponse OnComplete);
+	void SendPlayerInput(const FString& PlayerInput, FOnDialogResponse OnComplete);
 
 	/** Clears this NPC's history in the subsystem. */
 	UFUNCTION(BlueprintCallable, Category = "NPC")

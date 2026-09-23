@@ -1,5 +1,3 @@
-// NPCDialogSubsystem.cpp
-
 #include "NPCDialogSubsystem.h"
 #include "Engine/Engine.h"
 #include "LlamaSubsystem.h"
@@ -65,7 +63,7 @@ bool UNPCDialogSubsystem::IsNPCRegistered(FName NPCId) const
 	return ContextRegistry.Contains(NPCId);
 }
 
-void UNPCDialogSubsystem::RequestGeneration(FName NPCId, const FString& PlayerInput, FOnDialogueResponse OnComplete)
+void UNPCDialogSubsystem::RequestGeneration(FName NPCId, const FString& PlayerInput, FOnDialogResponse OnComplete)
 {
 	FNPCConversationState* State = ContextRegistry.Find(NPCId);
 	if (!State)
@@ -153,7 +151,7 @@ void UNPCDialogSubsystem::ProcessNextRequest()
 
 }
 
-void UNPCDialogSubsystem::HandleGenerationComplete(FName NPCId, FString GeneratedText, FOnDialogueResponse OriginalCallback)
+void UNPCDialogSubsystem::HandleGenerationComplete(FName NPCId, FString GeneratedText, FOnDialogResponse OriginalCallback)
 {
 	if (FNPCConversationState* State = ContextRegistry.Find(NPCId))
 	{
@@ -166,7 +164,7 @@ void UNPCDialogSubsystem::HandleGenerationComplete(FName NPCId, FString Generate
 
 	bIsGenerating = false;
 	CurrentGeneratingNPCId = NAME_None;
-	CurrentCallback = FOnDialogueResponse();
+	CurrentCallback = FOnDialogResponse();
 
 	if (OriginalCallback.IsBound())
 	{

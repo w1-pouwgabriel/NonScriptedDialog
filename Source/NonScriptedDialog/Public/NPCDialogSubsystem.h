@@ -1,7 +1,3 @@
-
-// Centralized owner of every NPC's conversation context, and the single
-// queue through which all generation requests pass
-
 #pragma once
 
 #include "CoreMinimal.h"
@@ -38,7 +34,7 @@ struct FPendingDialogueRequest
 {
 	FName NPCId;
 	FString PlayerInput;
-	FOnDialogueResponse Callback;
+	FOnDialogResponse Callback;
 };
 
 /**
@@ -69,7 +65,7 @@ public:
 	 * at a time in submission order, across ALL NPCs, since they share one model.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "NPC|Dialogue")
-	void RequestGeneration(FName NPCId, const FString& PlayerInput, FOnDialogueResponse OnComplete);
+	void RequestGeneration(FName NPCId, const FString& PlayerInput, FOnDialogResponse OnComplete);
 
 	/** Clears one NPC's history, e.g. when a conversation session ends. */
 	UFUNCTION(BlueprintCallable, Category = "NPC|Dialogue")
@@ -94,7 +90,7 @@ private:
 	// doesn't carry an NPC id, so we track this ourselves. This is safe because
 	// bIsGenerating guarantees only one request is ever in flight at a time.
 	FName CurrentGeneratingNPCId;
-	FOnDialogueResponse CurrentCallback;
+	FOnDialogResponse CurrentCallback;
 
 	// Pops the next request (if any) and kicks off generation, provided
 	// nothing else is currently running against the shared model.
@@ -107,7 +103,7 @@ private:
 
 	// Called once the model finishes; records the response, fires the
 	// caller's callback, then advances the queue.
-	void HandleGenerationComplete(FName NPCId, FString GeneratedText, FOnDialogueResponse OriginalCallback);
+	void HandleGenerationComplete(FName NPCId, FString GeneratedText, FOnDialogResponse OriginalCallback);
 	FString SanitizeGeneratedResponse(const FString& RawResponse) const;
 
 	// Bound to ULlamaSubsystem::OnResponseGenerated. Double check this

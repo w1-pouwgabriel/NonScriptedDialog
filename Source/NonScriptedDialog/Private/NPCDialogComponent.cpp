@@ -27,7 +27,7 @@ void UNPCDialogComponent::BeginPlay()
 	}
 }
 
-void UNPCDialogComponent::SendPlayerInput(const FString& PlayerInput, FOnDialogueResponse OnComplete)
+void UNPCDialogComponent::SendPlayerInput(const FString& PlayerInput, FOnDialogResponse OnComplete)
 {
 	UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
 	if (!GI)

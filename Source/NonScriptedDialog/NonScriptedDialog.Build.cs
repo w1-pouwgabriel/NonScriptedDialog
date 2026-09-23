@@ -19,6 +19,7 @@ public class NonScriptedDialog : ModuleRules
 			"GameplayStateTreeModule",
 			"UMG",
 			"Slate",
+            "SlateCore",
             "LlamaCore"
         });
 
