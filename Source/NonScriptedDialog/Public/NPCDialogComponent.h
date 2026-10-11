@@ -41,6 +41,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "NPC")
 	void ResetConversation();
 
+	UFUNCTION(BlueprintCallable, Category = "NPC")
+	void SaveConversation();
+
+	UFUNCTION(BlueprintCallable, Category = "NPC")
+	TArray<FNPCConversationEntry> GetConversationHistory() const;
+
 protected:
 	virtual void BeginPlay() override;
 };

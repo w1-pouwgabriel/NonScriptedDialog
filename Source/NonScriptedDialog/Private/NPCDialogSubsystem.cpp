@@ -1,6 +1,11 @@
 #include "NPCDialogSubsystem.h"
 #include "Engine/Engine.h"
 #include "LlamaSubsystem.h"
+#include "Misc/FileHelper.h"
+#include "HAL/FileManager.h"
+#include "Misc/Paths.h"
+#include "Serialization/JsonSerializer.h"
+#include "Dom/JsonObject.h"
 
 void UNPCDialogSubsystem::RegisterNPC(FName NPCId, UNPCCharacterSheetAsset* CharacterSheetAsset, int32 MaxHistoryEntries)
 {
@@ -20,6 +25,7 @@ void UNPCDialogSubsystem::RegisterNPC(FName NPCId, UNPCCharacterSheetAsset* Char
 	NewState.CachedBaseSystemPrompt = CharacterSheetAsset->BuildBaseSystemPrompt();
 	NewState.MaxHistoryEntries = MaxHistoryEntries;
 
+	LoadHistoryFromDisk(NPCId, CharacterSheetAsset, NewState.ConversationHistory);
 	ContextRegistry.Add(NPCId, MoveTemp(NewState));
 }
 
@@ -61,6 +67,120 @@ void UNPCDialogSubsystem::Deinitialize()
 bool UNPCDialogSubsystem::IsNPCRegistered(FName NPCId) const
 {
 	return ContextRegistry.Contains(NPCId);
+}
+
+FString UNPCDialogSubsystem::GetHistoryFilePath(FName NPCId) const
+{
+	return FPaths::ProjectSavedDir() / TEXT("NPCDialogueHistory") / (NPCId.ToString() + TEXT(".json"));
+}
+
+void UNPCDialogSubsystem::SaveHistoryToDisk(FName NPCId, const FNPCConversationState& State)
+{
+	TArray<TSharedPtr<FJsonValue>> JsonArray;
+	for (const FNPCConversationEntry& Entry : State.ConversationHistory)
+	{
+		TSharedPtr<FJsonObject> JsonEntry = MakeShared<FJsonObject>();
+		JsonEntry->SetStringField(TEXT("speaker"), Entry.Speaker == ENPCDialogSpeaker::Player ? TEXT("Player") : TEXT("NPC"));
+		JsonEntry->SetStringField(TEXT("text"), Entry.Text);
+		JsonArray.Add(MakeShared<FJsonValueObject>(JsonEntry));
+	}
+
+	FString OutputString;
+	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutputString);
+	FJsonSerializer::Serialize(JsonArray, Writer);
+
+	const FString FilePath = GetHistoryFilePath(NPCId, State.CharacterSheetAsset);
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(FilePath), true);
+	FFileHelper::SaveStringToFile(OutputString, *FilePath);
+}
+
+bool UNPCDialogSubsystem::LoadHistoryFromDisk(FName NPCId, const UNPCCharacterSheetAsset* CharacterSheetAsset, TArray<FNPCConversationEntry>& OutHistory) const
+{
+	const FString FilePath = GetHistoryFilePath(NPCId, CharacterSheetAsset);
+	FString FileContents;
+	if (!FFileHelper::LoadFileToString(FileContents, *FilePath))
+	{
+		return false; // No saved history yet for this NPC - not an error.
+	}
+
+	TArray<TSharedPtr<FJsonValue>> JsonArray;
+	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(FileContents);
+	if (!FJsonSerializer::Deserialize(Reader, JsonArray))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Failed to parse saved history for '%s' at %s"), *NPCId.ToString(), *FilePath);
+		return false;
+	}
+
+	OutHistory.Empty();
+	for (const TSharedPtr<FJsonValue>& Value : JsonArray)
+	{
+		const TSharedPtr<FJsonObject>* JsonEntry;
+		if (!Value->TryGetObject(JsonEntry))
+		{
+			continue;
+		}
+
+		FNPCConversationEntry Entry;
+		FString SpeakerStr;
+		(*JsonEntry)->TryGetStringField(TEXT("speaker"), SpeakerStr);
+		Entry.Speaker = (SpeakerStr == TEXT("Player")) ? ENPCDialogSpeaker::Player : ENPCDialogSpeaker::NPC;
+		(*JsonEntry)->TryGetStringField(TEXT("text"), Entry.Text);
+		OutHistory.Add(Entry);
+	}
+
+	return true;
+}
+
+FString UNPCDialogSubsystem::SanitizeForFilename(const FString& Input) const
+{
+	FString Result = Input;
+	Result.ReplaceInline(TEXT(" "), TEXT("_"));
+
+	// Strip characters Windows doesn't allow in filenames.
+	for (const TCHAR* Bad : { TEXT("\\"), TEXT("/"), TEXT(":"), TEXT("*"), TEXT("?"), TEXT("\""), TEXT("<"), TEXT(">"), TEXT("|") })
+	{
+		Result.ReplaceInline(Bad, TEXT(""));
+	}
+
+	return Result;
+}
+
+FString UNPCDialogSubsystem::GetHistoryFilePath(FName NPCId, const UNPCCharacterSheetAsset* CharacterSheetAsset) const
+{
+	FString FileBaseName;
+	if (CharacterSheetAsset && !CharacterSheetAsset->CharacterSheet.CharacterName.IsEmpty())
+	{
+		// e.g. "Bjorn_Blacksmith" - far easier to identify in the save folder
+		// than the actor's auto-generated instance name.
+		const FString Name = SanitizeForFilename(CharacterSheetAsset->CharacterSheet.CharacterName);
+		const FString Role = SanitizeForFilename(CharacterSheetAsset->CharacterSheet.Role);
+		FileBaseName = Role.IsEmpty() ? Name : FString::Printf(TEXT("%s_%s"), *Name, *Role);
+	}
+	else
+	{
+		// Fallback if no character sheet is assigned yet - still readable-ish.
+		FileBaseName = SanitizeForFilename(NPCId.ToString());
+	}
+
+	return FPaths::ProjectSavedDir() / TEXT("NPCDialogueHistory") / (FileBaseName + TEXT(".json"));
+}
+
+void UNPCDialogSubsystem::SaveConversation(FName NPCId)
+{
+	if (const FNPCConversationState* State = ContextRegistry.Find(NPCId))
+	{
+		SaveHistoryToDisk(NPCId, *State);
+	}
+}
+
+TArray<FNPCConversationEntry> UNPCDialogSubsystem::GetConversationHistory(FName NPCId) const
+{
+	if (const FNPCConversationState* State = ContextRegistry.Find(NPCId))
+	{
+		return State->ConversationHistory;
+	}
+
+	return TArray<FNPCConversationEntry>();
 }
 
 void UNPCDialogSubsystem::RequestGeneration(FName NPCId, const FString& PlayerInput, FOnDialogResponse OnComplete)
@@ -229,4 +349,6 @@ void UNPCDialogSubsystem::ResetConversation(FName NPCId)
 	{
 		State->ConversationHistory.Empty();
 	}
+	
+	IFileManager::Get().Delete(*GetHistoryFilePath(NPCId));
 }

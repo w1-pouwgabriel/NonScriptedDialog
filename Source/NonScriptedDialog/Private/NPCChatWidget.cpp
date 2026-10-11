@@ -20,6 +20,11 @@ void UNPCChatWidget::NativeConstruct()
 	{
 		PlayerInputBox->OnTextCommitted.AddDynamic(this, &UNPCChatWidget::HandlePlayerInputCommitted);
 	}
+
+	if (CloseButton)
+	{
+		CloseButton->OnClicked.AddDynamic(this, &UNPCChatWidget::CloseChatWindow);
+	}
 }
 
 void UNPCChatWidget::SetTargetNPC(UNPCDialogComponent* InDialogueComponent, const FText& InNPCDisplayName)
@@ -30,6 +35,20 @@ void UNPCChatWidget::SetTargetNPC(UNPCDialogComponent* InDialogueComponent, cons
 	if (HistoryContainer)
 	{
 		HistoryContainer->ClearChildren();
+	}
+
+	// Replay any history loaded from disk so re-opening the window shows
+	// past conversation instead of starting blank, even though the
+	// subsystem already had this context loaded for prompting purposes.
+	if (TargetDialogComponent)
+	{
+		for (const FNPCConversationEntry& Entry : TargetDialogComponent->GetConversationHistory())
+		{
+			const FText Speaker = (Entry.Speaker == ENPCDialogSpeaker::Player)
+				? FText::FromString(TEXT("You"))
+				: NPCDisplayName;
+			AppendMessageToHistory(Speaker, Entry.Text);
+		}
 	}
 
 	bWaitingForResponse = false;
@@ -116,6 +135,11 @@ void UNPCChatWidget::AppendMessageToHistory(const FText& Speaker, const FString&
 
 void UNPCChatWidget::CloseChatWindow()
 {
+	if (TargetDialogComponent)
+	{
+		TargetDialogComponent->SaveConversation();
+	}
+
 	if (APlayerController* PC = GetOwningPlayer())
 	{
 		FInputModeGameOnly InputMode;

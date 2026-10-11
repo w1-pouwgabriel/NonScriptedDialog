@@ -46,6 +46,9 @@ protected:
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UButton> SendButton;
 
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UButton> CloseButton;
+
 private:
 	UPROPERTY()
 	TObjectPtr<UNPCDialogComponent> TargetDialogComponent;

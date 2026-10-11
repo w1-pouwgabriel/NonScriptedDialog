@@ -20,7 +20,9 @@ public class NonScriptedDialog : ModuleRules
 			"UMG",
 			"Slate",
             "SlateCore",
-            "LlamaCore"
+            "LlamaCore", 
+			"Json", 
+			"JsonUtilities"
         });
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });

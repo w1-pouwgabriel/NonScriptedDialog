@@ -74,6 +74,18 @@ public:
 	UFUNCTION(BlueprintPure, Category = "NPC|Dialogue")
 	bool IsNPCRegistered(FName NPCId) const;
 
+	UFUNCTION(BlueprintCallable, Category = "NPC|Dialogue")
+	void SaveConversation(FName NPCId);
+
+	UFUNCTION(BlueprintCallable, Category = "NPC|Dialogue")
+	TArray<FNPCConversationEntry> GetConversationHistory(FName NPCId) const;
+
+	FString GetHistoryFilePath(FName NPCId) const;
+	void SaveHistoryToDisk(FName NPCId, const FNPCConversationState& State); 
+	bool LoadHistoryFromDisk(FName NPCId, const UNPCCharacterSheetAsset* CharacterSheetAsset, TArray<FNPCConversationEntry>& OutHistory) const;
+	FString GetHistoryFilePath(FName NPCId, const UNPCCharacterSheetAsset* CharacterSheetAsset) const;
+	FString SanitizeForFilename(const FString& Input) const;
+
 private:
 	// The context registry: single source of truth for every NPC's state.
 	UPROPERTY()

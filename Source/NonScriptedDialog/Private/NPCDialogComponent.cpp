@@ -41,6 +41,20 @@ void UNPCDialogComponent::SendPlayerInput(const FString& PlayerInput, FOnDialogR
 	}
 }
 
+void UNPCDialogComponent::SaveConversation()
+{
+	UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
+	if (!GI)
+	{
+		return;
+	}
+
+	if (UNPCDialogSubsystem* Subsystem = GI->GetSubsystem<UNPCDialogSubsystem>())
+	{
+		Subsystem->SaveConversation(NPCId);
+	}
+}
+
 void UNPCDialogComponent::ResetConversation()
 {
 	UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
@@ -53,4 +67,15 @@ void UNPCDialogComponent::ResetConversation()
 	{
 		Subsystem->ResetConversation(NPCId);
 	}
+}
+
+TArray<FNPCConversationEntry> UNPCDialogComponent::GetConversationHistory() const
+{
+	UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
+	if (UNPCDialogSubsystem* Subsystem = GI ? GI->GetSubsystem<UNPCDialogSubsystem>() : nullptr)
+	{
+		return Subsystem->GetConversationHistory(NPCId);
+	}
+
+	return TArray<FNPCConversationEntry>();
 }
