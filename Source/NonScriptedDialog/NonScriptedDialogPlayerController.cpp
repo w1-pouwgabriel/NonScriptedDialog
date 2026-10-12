@@ -8,6 +8,7 @@
 #include "Blueprint/UserWidget.h"
 #include "NonScriptedDialog.h"
 #include "Widgets/Input/SVirtualJoystick.h"
+#include <NPCDialogSubsystem.h>
 
 void ANonScriptedDialogPlayerController::BeginPlay()
 {
@@ -58,10 +59,23 @@ void ANonScriptedDialogPlayerController::SetupInputComponent()
 			}
 		}
 	}
+
+	InputComponent->BindAction("RunBenchmark", IE_Pressed, this, &ANonScriptedDialogPlayerController::OnRunBenchmarkPressed);
 }
 
 bool ANonScriptedDialogPlayerController::ShouldUseTouchControls() const
 {
 	// are we on a mobile platform? Should we force touch?
 	return SVirtualJoystick::ShouldDisplayTouchInterface() || bForceTouchControls;
+}
+
+void ANonScriptedDialogPlayerController::OnRunBenchmarkPressed()
+{
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UNPCDialogSubsystem* Subsystem = GI->GetSubsystem<UNPCDialogSubsystem>())
+		{
+			Subsystem->StartBenchmarkSweep(TEXT("Bjorn"));
+		}
+	}
 }

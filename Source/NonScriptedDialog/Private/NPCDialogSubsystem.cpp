@@ -40,6 +40,7 @@ void UNPCDialogSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		//Llama->OnModelLoaded.AddDynamic(this, &UNPCDialogSubsystem::OnModelLoaded);
 		Llama->ModelParams.StopSequences = { TEXT("\nPlayer:") };
 		Llama->OnResponseGenerated.AddDynamic(this, &UNPCDialogSubsystem::HandleLlamaResponseGenerated);
+		Llama->OnTokenGenerated.AddDynamic(this, &UNPCDialogSubsystem::HandleLlamaTokenGenerated);
 		Llama->LoadModel();
 	}
 	else
@@ -55,6 +56,7 @@ void UNPCDialogSubsystem::Deinitialize()
 		if (ULlamaSubsystem* Llama = GEngine->GetEngineSubsystem<ULlamaSubsystem>())
 		{
 			Llama->OnResponseGenerated.RemoveDynamic(this, &UNPCDialogSubsystem::HandleLlamaResponseGenerated);
+			Llama->OnTokenGenerated.RemoveDynamic(this, &UNPCDialogSubsystem::HandleLlamaTokenGenerated);
 			// Deliberately NOT calling Llama->UnloadModel() here - ULlamaSubsystem
 			// is engine-scoped and may outlive this game instance (e.g. PIE
 			// stop/start), so unloading is its own concern, not ours.
@@ -165,6 +167,105 @@ FString UNPCDialogSubsystem::GetHistoryFilePath(FName NPCId, const UNPCCharacter
 	return FPaths::ProjectSavedDir() / TEXT("NPCDialogueHistory") / (FileBaseName + TEXT(".json"));
 }
 
+void UNPCDialogSubsystem::StartBenchmarkSweep(FName NPCId)
+{
+	if (!IsNPCRegistered(NPCId))
+	{
+		UE_LOG(LogTemp, Error, TEXT("StartBenchmarkSweep - NPC '%s' is not registered. Place/register it in the level first."), *NPCId.ToString());
+		return;
+	}
+
+	if (bBenchmarkRunning)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("StartBenchmarkSweep - a sweep is already running."));
+		return;
+	}
+
+	ULlamaSubsystem* Llama = GEngine ? GEngine->GetEngineSubsystem<ULlamaSubsystem>() : nullptr;
+	if (!Llama)
+	{
+		return;
+	}
+
+	bBenchmarkRunning = true;
+	BenchmarkNPCId = NPCId;
+	BenchmarkModelIndex = 0;
+
+	Llama->OnModelLoaded.AddDynamic(this, &UNPCDialogSubsystem::HandleBenchmarkModelLoaded);
+
+	UE_LOG(LogTemp, Log, TEXT("=== Starting benchmark sweep: %d models x %d prompts ==="), BenchmarkModelPaths.Num(), BenchmarkPrompts.Num());
+	LoadNextBenchmarkModel();
+}
+
+void UNPCDialogSubsystem::LoadNextBenchmarkModel()
+{
+	ULlamaSubsystem* Llama = GEngine ? GEngine->GetEngineSubsystem<ULlamaSubsystem>() : nullptr;
+
+	if (BenchmarkModelIndex >= BenchmarkModelPaths.Num())
+	{
+		UE_LOG(LogTemp, Log, TEXT("=== Benchmark sweep complete - results in %s ==="), *GetBenchmarkFilePath());
+
+		if (Llama)
+		{
+			Llama->OnModelLoaded.RemoveDynamic(this, &UNPCDialogSubsystem::HandleBenchmarkModelLoaded);
+		}
+		bBenchmarkRunning = false;
+		return;
+	}
+
+	if (!Llama)
+	{
+		bBenchmarkRunning = false;
+		return;
+	}
+
+	// Explicitly free the previous model's memory before loading the next -
+	// without this, memory pressure compounds across the sweep and eventually
+	// tanks the engine's frame rate, which corrupts every timing measurement
+	// taken from that point on (frame-rate-locked tick granularity).
+	Llama->UnloadModel();
+	GEngine->ForceGarbageCollection(true);
+
+	const FString& NextModelPath = BenchmarkModelPaths[BenchmarkModelIndex];
+	UE_LOG(LogTemp, Log, TEXT("--- Loading model %d/%d: %s ---"), BenchmarkModelIndex + 1, BenchmarkModelPaths.Num(), *NextModelPath);
+
+	ResetConversation(BenchmarkNPCId);
+
+	Llama->ModelParams.PathToModel = NextModelPath;
+	Llama->LoadModel(/*bForceReload=*/true);
+}
+
+void UNPCDialogSubsystem::HandleBenchmarkModelLoaded(const FString& ModelName)
+{
+	if (!bBenchmarkRunning)
+	{
+		return; // Ignore load events outside of an active sweep (e.g. normal gameplay model loads).
+	}
+
+	BenchmarkPromptIndex = 0;
+	RunNextBenchmarkPrompt();
+}
+
+void UNPCDialogSubsystem::RunNextBenchmarkPrompt()
+{
+	if (BenchmarkPromptIndex >= BenchmarkPrompts.Num())
+	{
+		++BenchmarkModelIndex;
+		LoadNextBenchmarkModel();
+		return;
+	}
+
+	FOnDialogResponse Callback;
+	Callback.BindDynamic(this, &UNPCDialogSubsystem::HandleBenchmarkPromptResponse);
+	RequestGeneration(BenchmarkNPCId, BenchmarkPrompts[BenchmarkPromptIndex], Callback);
+}
+
+void UNPCDialogSubsystem::HandleBenchmarkPromptResponse(const FString& Response)
+{
+	++BenchmarkPromptIndex;
+	RunNextBenchmarkPrompt();
+}
+
 void UNPCDialogSubsystem::SaveConversation(FName NPCId)
 {
 	if (const FNPCConversationState* State = ContextRegistry.Find(NPCId))
@@ -261,14 +362,19 @@ void UNPCDialogSubsystem::ProcessNextRequest()
 			? EChatTemplateRole::User
 			: EChatTemplateRole::Assistant;
 
-		// Only the LAST message (the newest player line) should trigger generation -
-		// everything before it is just replaying history into context.
 		const bool bIsLastMessage = (i == LastIndex);
-		Llama->InsertTemplatedPrompt(Entry.Text, Role, bIsLastMessage, /*bGenerateReply=*/bIsLastMessage);
 
-		//UE_LOG(LogTemp, Log, TEXT("%hs: %s"), ToString(Entry.Speaker), *Entry.Text);
+		if (bIsLastMessage)
+		{
+			// Start the clock right as generation is triggered, not before -
+			// this captures prompt reprocessing + decode time, i.e. what the
+			// player actually waits for.
+			RequestStartTimeSeconds = FPlatformTime::Seconds();
+			CurrentGeneratedTokenCount = 0;
+		}
+
+		Llama->InsertTemplatedPrompt(Entry.Text, Role, /*bAddAssistantBOS=*/bIsLastMessage, /*bGenerateReply=*/bIsLastMessage);
 	}
-
 }
 
 void UNPCDialogSubsystem::HandleGenerationComplete(FName NPCId, FString GeneratedText, FOnDialogResponse OriginalCallback)
@@ -310,8 +416,12 @@ FString UNPCDialogSubsystem::SanitizeGeneratedResponse(const FString& RawRespons
 
 void UNPCDialogSubsystem::HandleLlamaResponseGenerated(const FString& Response)
 {
+	const double ElapsedSeconds = FPlatformTime::Seconds() - RequestStartTimeSeconds;
+	LogPerformanceSample(CurrentGeneratingNPCId, CurrentGeneratedTokenCount, ElapsedSeconds);
+
 	const FString CleanedResponse = SanitizeGeneratedResponse(Response);
 
+	UE_LOG(LogTemp, Log, TEXT("NPC said: %s"), *CleanedResponse);
 	HandleGenerationComplete(CurrentGeneratingNPCId, CleanedResponse, CurrentCallback);
 }
 
@@ -351,4 +461,62 @@ void UNPCDialogSubsystem::ResetConversation(FName NPCId)
 	}
 	
 	IFileManager::Get().Delete(*GetHistoryFilePath(NPCId));
+}
+
+void UNPCDialogSubsystem::HandleLlamaTokenGenerated(const FString& Token)
+{
+	++CurrentGeneratedTokenCount;
+}
+
+FString UNPCDialogSubsystem::GetBenchmarkFilePath() const
+{
+	return FPaths::ProjectSavedDir() / TEXT("PerformanceBenchmarks") / TEXT("dialogue_benchmark.csv");
+}
+
+void UNPCDialogSubsystem::LogPerformanceSample(FName NPCId, int32 TokenCount, double ElapsedSeconds) const
+{
+	// Approximate throughput: total round-trip (prompt reprocessing + decode)
+	// divided by tokens generated. This is the latency the player actually
+	// feels, not a pure decode-only tps - cross-check against the plugin's
+	// own "TGS - Generated N tokens" log line if you need decode-only speed.
+	const double TokensPerSecond = (ElapsedSeconds > 0.0) ? (TokenCount / ElapsedSeconds) : 0.0;
+
+	FString ModelPath = TEXT("unknown");
+	if (GEngine)
+	{
+		if (ULlamaSubsystem* Llama = GEngine->GetEngineSubsystem<ULlamaSubsystem>())
+		{
+			ModelPath = Llama->ModelParams.PathToModel;
+		}
+	}
+
+	const FString FilePath = GetBenchmarkFilePath();
+	const bool bFileExists = FPaths::FileExists(FilePath);
+
+	FString Line;
+	if (!bFileExists)
+	{
+		Line += TEXT("Timestamp,NPCId,ModelPath,GeneratedTokens,ElapsedSeconds,TokensPerSecond\n");
+	}
+
+	Line += FString::Printf(
+		TEXT("%s,%s,%s,%d,%.3f,%.2f\n"),
+		*FDateTime::Now().ToString(),
+		*NPCId.ToString(),
+		*ModelPath,
+		TokenCount,
+		ElapsedSeconds,
+		TokensPerSecond
+	);
+
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(FilePath), true);
+	FFileHelper::SaveStringToFile(
+		Line,
+		*FilePath,
+		FFileHelper::EEncodingOptions::AutoDetect,
+		&IFileManager::Get(),
+		FILEWRITE_Append
+	);
+
+	UE_LOG(LogTemp, Log, TEXT("Benchmark: %s - %d tokens in %.2fs (%.2f tok/s)"), *NPCId.ToString(), TokenCount, ElapsedSeconds, TokensPerSecond);
 }

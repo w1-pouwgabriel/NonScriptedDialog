@@ -86,7 +86,47 @@ public:
 	FString GetHistoryFilePath(FName NPCId, const UNPCCharacterSheetAsset* CharacterSheetAsset) const;
 	FString SanitizeForFilename(const FString& Input) const;
 
+	UFUNCTION(BlueprintCallable, Category = "NPC|Benchmark")
+	void StartBenchmarkSweep(FName NPCId);
+
 private:
+	// Fixed battery run against every model, so results are directly comparable.
+	TArray<FString> BenchmarkModelPaths = {
+		TEXT("./qwen2.5-1.5b-instruct-q2_k.gguf"),
+		TEXT("./qwen2.5-1.5b-instruct-q3_k_m.gguf"),
+		TEXT("./qwen2.5-1.5b-instruct-q4_0.gguf"),
+		TEXT("./qwen2.5-1.5b-instruct-q4_k_m.gguf"),
+		TEXT("./qwen2.5-1.5b-instruct-q5_0.gguf"),
+		TEXT("./qwen2.5-1.5b-instruct-q5_k_m.gguf"),
+		TEXT("./qwen2.5-1.5b-instruct-q6_k.gguf"),
+		TEXT("./qwen2.5-1.5b-instruct-q8_0.gguf"),
+		TEXT("./qwen2.5-1.5b-instruct-fp16.gguf"),
+	};
+
+	TArray<FString> BenchmarkPrompts = {
+		TEXT("What do you sell?"),
+		TEXT("Do you have any weapons?"),
+		TEXT("How much does a sword cost?"),
+		TEXT("Can you make something custom for me?"),
+		TEXT("Thank you, goodbye."),
+	};
+
+	FName BenchmarkNPCId;
+	int32 BenchmarkModelIndex = 0;
+	int32 BenchmarkPromptIndex = 0;
+	bool bBenchmarkRunning = false;
+
+	// Bound to ULlamaSubsystem::OnModelLoaded - verify FModelNameSignature's
+	// actual parameter type in LlamaDataTypes.h and adjust if needed.
+	UFUNCTION()
+	void HandleBenchmarkModelLoaded(const FString& ModelName);
+
+	void LoadNextBenchmarkModel();
+	void RunNextBenchmarkPrompt();
+
+	UFUNCTION()
+	void HandleBenchmarkPromptResponse(const FString& Response);
+
 	// The context registry: single source of truth for every NPC's state.
 	UPROPERTY()
 	TMap<FName, FNPCConversationState> ContextRegistry;
@@ -122,4 +162,13 @@ private:
 	// signature against FOnResponseGeneratedSignature in LlamaDataTypes.h.
 	UFUNCTION()
 	void HandleLlamaResponseGenerated(const FString& Response);
+
+	double RequestStartTimeSeconds = 0.0;
+	int32 CurrentGeneratedTokenCount = 0;
+
+	UFUNCTION()
+	void HandleLlamaTokenGenerated(const FString& Token);
+
+	void LogPerformanceSample(FName NPCId, int32 TokenCount, double ElapsedSeconds) const;
+	FString GetBenchmarkFilePath() const;
 };
