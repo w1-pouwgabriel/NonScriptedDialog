@@ -465,6 +465,8 @@ void UNPCDialogSubsystem::ResetConversation(FName NPCId)
 
 void UNPCDialogSubsystem::HandleLlamaTokenGenerated(const FString& Token)
 {
+	// Show the individual tokens in the chat log 
+	// instead of only showing the generation after completion
 	++CurrentGeneratedTokenCount;
 }
 
