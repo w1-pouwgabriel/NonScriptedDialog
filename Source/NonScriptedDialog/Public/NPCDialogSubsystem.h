@@ -89,6 +89,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "NPC|Benchmark")
 	void StartBenchmarkSweep(FName NPCId);
 
+	UPROPERTY(BlueprintAssignable, Category = "NPC|Dialogue")
+	FOnNPCTokenStreamed OnNPCTokenStreamed;
+
 private:
 	// Fixed battery run against every model, so results are directly comparable.
 	TArray<FString> BenchmarkModelPaths = {

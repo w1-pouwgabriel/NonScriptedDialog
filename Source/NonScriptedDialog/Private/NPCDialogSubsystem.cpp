@@ -465,8 +465,8 @@ void UNPCDialogSubsystem::ResetConversation(FName NPCId)
 
 void UNPCDialogSubsystem::HandleLlamaTokenGenerated(const FString& Token)
 {
-	// Show the individual tokens in the chat log 
-	// instead of only showing the generation after completion
+	//UE_LOG(LogTemp, Log, TEXT("Broadcasting token for NPC '%s': %s"), *CurrentGeneratingNPCId.ToString(), *Token); //Token is the entire word, not letter for letter
+	OnNPCTokenStreamed.Broadcast(CurrentGeneratingNPCId, Token);
 	++CurrentGeneratedTokenCount;
 }
 

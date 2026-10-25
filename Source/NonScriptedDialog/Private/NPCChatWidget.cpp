@@ -6,6 +6,7 @@
 #include "Components/Button.h"
 #include "Components/TextBlock.h"
 #include "GameFramework/PlayerController.h"
+#include "NPCDialogSubsystem.h"
 
 void UNPCChatWidget::NativeConstruct()
 {
@@ -21,9 +22,56 @@ void UNPCChatWidget::NativeConstruct()
 		PlayerInputBox->OnTextCommitted.AddDynamic(this, &UNPCChatWidget::HandlePlayerInputCommitted);
 	}
 
-	if (CloseButton)
+	if (UGameInstance* GI = GetGameInstance())
 	{
-		CloseButton->OnClicked.AddDynamic(this, &UNPCChatWidget::CloseChatWindow);
+		if (UNPCDialogSubsystem* Subsystem = GI->GetSubsystem<UNPCDialogSubsystem>())
+		{
+			Subsystem->OnNPCTokenStreamed.AddDynamic(this, &UNPCChatWidget::HandleTokenStreamed);
+		}
+	}
+}
+
+void UNPCChatWidget::NativeDestruct()
+{
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UNPCDialogSubsystem* Subsystem = GI->GetSubsystem<UNPCDialogSubsystem>())
+		{
+			Subsystem->OnNPCTokenStreamed.RemoveDynamic(this, &UNPCChatWidget::HandleTokenStreamed);
+		}
+	}
+
+	Super::NativeDestruct();
+}
+
+void UNPCChatWidget::HandleTokenStreamed(FName StreamedNPCId, const FString& Token)
+{
+	//UE_LOG(LogTemp, Log, TEXT("Widget received token for '%s' (target is '%s')"), *StreamedNPCId.ToString(), TargetDialogueComponent ? *TargetDialogueComponent->NPCId.ToString() : TEXT("NULL"));
+
+	if (!TargetDialogComponent || StreamedNPCId != TargetDialogComponent->NPCId || !HistoryContainer)
+	{
+		return;
+	}
+
+	if (!CurrentStreamingLine)
+	{
+		CurrentStreamingLine = NewObject<UTextBlock>(this);
+		CurrentStreamingLine->SetAutoWrapText(true);
+		HistoryContainer->AddChildToVerticalBox(CurrentStreamingLine);
+		CurrentStreamingText.Empty();
+	}
+
+	CurrentStreamingText += Token;
+
+	CurrentStreamingLine->SetText(FText::Format(
+		NSLOCTEXT("NPCChat", "ChatLineFormat", "{0}: {1}"),
+		NPCDisplayName,
+		FText::FromString(CurrentStreamingText)
+	));
+
+	if (HistoryScrollBox)
+	{
+		HistoryScrollBox->ScrollToEnd();
 	}
 }
 
@@ -100,7 +148,17 @@ void UNPCChatWidget::SubmitPlayerLine(const FString& PlayerLine)
 
 void UNPCChatWidget::HandleNPCResponse(const FString& Response)
 {
-	AppendMessageToHistory(NPCDisplayName, Response);
+	if (!CurrentStreamingLine)
+	{
+		// Streaming never produced a visible line for this response - either
+		// the token delegate didn't fire or didn't reach this widget. Fall
+		// back to the old behavior so the player still sees the reply
+		// instead of a blank gap, while we track down why streaming failed.
+		AppendMessageToHistory(NPCDisplayName, Response);
+	}
+
+	CurrentStreamingLine = nullptr;
+	CurrentStreamingText.Empty();
 
 	bWaitingForResponse = false;
 	if (PlayerInputBox)

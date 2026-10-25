@@ -4,6 +4,7 @@
 #include "Blueprint/UserWidget.h"
 #include "NPCDialogTypes.h"
 #include "Types/SlateEnums.h"
+#include "Components/TextBlock.h"
 #include "NPCChatWidget.generated.h"
 
 class UScrollBox;
@@ -28,6 +29,7 @@ public:
 
 protected:
 	virtual void NativeConstruct() override;
+	virtual void NativeDestruct() override;
 
 	// In the UMG Designer: ScrollBox named "HistoryScrollBox" containing a
 	// VerticalBox named "HistoryContainer" - each chat line becomes one
@@ -55,6 +57,11 @@ private:
 
 	FText NPCDisplayName;
 
+	UPROPERTY()
+	TObjectPtr<UTextBlock> CurrentStreamingLine;
+
+	FString CurrentStreamingText;
+
 	// Prevents queuing a second request while the shared model is still
 	// working on the first - keeps the UI honest about what's in flight.
 	bool bWaitingForResponse = false;
@@ -70,4 +77,7 @@ private:
 
 	void SubmitPlayerLine(const FString& PlayerLine);
 	void AppendMessageToHistory(const FText& Speaker, const FString& MessageText);
+
+	UFUNCTION()
+	void HandleTokenStreamed(FName StreamedNPCId, const FString& Token);
 };
