@@ -375,7 +375,7 @@ void UNPCDialogSubsystem::ProcessNextRequest()
 
 		Llama->InsertTemplatedPrompt(Entry.Text, Role, /*bAddAssistantBOS=*/bIsLastMessage, /*bGenerateReply=*/bIsLastMessage);
 	}
-}
+};
 
 void UNPCDialogSubsystem::HandleGenerationComplete(FName NPCId, FString GeneratedText, FOnDialogResponse OriginalCallback)
 {
